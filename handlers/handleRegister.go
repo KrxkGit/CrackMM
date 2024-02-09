@@ -13,7 +13,7 @@ const (
 	activeSchema string = "http://" // 激活服务器协议
 )
 
-func HandeRegister(client net.Conn) {
+func HandleRegister(client net.Conn) {
 	defer client.Close()
 	// 过滤非目标
 	//fmt.Println("Source: ", client.RemoteAddr())

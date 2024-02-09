@@ -31,7 +31,7 @@ func main() {
 		if err != nil {
 			log.Println(err.Error())
 		}
-		go handlers.HandeRegister(conn)
+		go handlers.HandleRegister(conn)
 	}
 }
 

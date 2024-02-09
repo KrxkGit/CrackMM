@@ -39,6 +39,13 @@ jobs:
         go env -w GOARCH=arm64
         go build -o dist/Linux_arm64 -v .
 
+    - name: Build-mipsle-OpenWRT
+      run: |
+        go env -w GOOS=linux
+        go env -w GOARCH=mipsle
+        go env -w GOMIPS=softfloat
+        go build -o dist/OpenWRT_mipsle -v .
+
     - name: Tidy up Setting
       run: |
         mv setting.json dist/
