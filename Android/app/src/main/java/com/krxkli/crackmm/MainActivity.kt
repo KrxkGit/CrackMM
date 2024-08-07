@@ -1,26 +1,27 @@
 package com.krxkli.crackmm
 
+import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
-import android.util.Log
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.krxkli.crackmm.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
+    var TAG = "MainActivity"
     private lateinit var binding: ActivityMainBinding
-    private var serviceLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK) {
-            Toast.makeText(this, "VPN Connected", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "VPN Disconnected", Toast.LENGTH_SHORT).show()
+
+    /**
+     * 用于等待申请运行时 VPN 权限结果
+     */
+    private val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
+        if (resultCode.resultCode == Activity.RESULT_OK) {
+            startVPNService()
         }
     }
-
-    var TAG = "MainActivity"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,26 +29,24 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Example of a call to a native method
-//        binding.sampleText.text = stringFromJNI()
         binding.activeKey.setOnClickListener {
             startVPN()
         }
     }
 
-    fun startVPN() {
-
-        val intent = Intent(this, ActiveService::class.java)
+    private fun startVPN() {
         val prepare = VpnService.prepare(applicationContext)
-
-        if (prepare != null) {
-            serviceLauncher.launch(prepare)
+        if (prepare == null) { // VPN 准备完成，可以直接启动
+            startVPNService()
         } else {
-            startService(intent)
+            launcher.launch(prepare)
         }
     }
 
-
+    private fun startVPNService() {
+        val intent = Intent(this, ActiveService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+    }
 
 
     /**
