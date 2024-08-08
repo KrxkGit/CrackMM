@@ -104,7 +104,7 @@ class ActiveService : VpnService() {
     }
 
     fun protectSocket(fd: Int) : Boolean {
-        Log.d(TAG, "protectSocket: $fd")
+//        Log.d(TAG, "protectSocket: $fd")
         this.protect(fd)
         return true
     }

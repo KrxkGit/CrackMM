@@ -15,6 +15,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Golang 库为下列架构
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
