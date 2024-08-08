@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <queue>
 #include <thread>
 #include <netinet/tcp.h>
 
@@ -7,26 +8,51 @@ extern "C" {
 }
 #define PKT_BUF_SIZE 65535
 
+// VPN 描述符
+int tun_fd;
 // JVM 变量缓存区
 JNIEnv *env;
-jobject vpn_service_obj;
+jobject vpn_processor_obj;
+jmethodID protect_socket_methodID;
+// 线程同步区
+std::mutex mtx;
+std::condition_variable cv;
+std::queue<int> sockets_queue;
+volatile bool process_competed = false;
+
+void do_protect_socket(int socket) {
+    jboolean ret = env->CallBooleanMethod(vpn_processor_obj, protect_socket_methodID, socket);
+}
 
 int data_in(zdtun_t *tun, zdtun_pkt_t *pkt, const zdtun_conn_t *conn_info) {
-    log("handle_thread\n")
+    int byteWrite = write(tun_fd, pkt->buf, pkt->len);
+    if (byteWrite < 0) {
+        log("write error\n")
+        return -1;
+    }
     return 0;
 }
 
 void protect_socket(zdtun_t *tun, socket_t socket) {
-    log("protect_socket\n")
+//    log("protect_socket\n")
 
     //TODO: 采用发送到主线程执行的方案
-//    jmethodID methodID = env->GetMethodID(env->GetObjectClass(vpn_service_obj), "protectSocket",
-//                                          "(I)Z");
-//    jboolean ret = env->CallBooleanMethod(vpn_service_obj, methodID, socket);
+    std::unique_lock<std::mutex> lock(mtx);
+    sockets_queue.push(socket);
+    cv.notify_one();
+
+    // 等待处理结果
+    cv.wait(lock, [] { return process_competed; });
 }
 
 void handle_thread(int fd) {
     log("fd = %d\n", fd)
+    ::tun_fd = fd;
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
+        log("fcntl error")
+    }
 
     zdtun_callbacks_t callbacks = {
             .send_client = data_in,
@@ -52,8 +78,6 @@ void handle_thread(int fd) {
                 log("read error")
                 continue;
             } else {
-//                log("read %d bytes", len)
-
                 zdtun_pkt_t pkt;
                 zdtun_parse_pkt(tun, pkt_buf, len, &pkt);
 
@@ -62,16 +86,24 @@ void handle_thread(int fd) {
                          (!(pkt.tcp->th_flags & TH_SYN) || (pkt.tcp->th_flags & TH_ACK)));
 
                 zdtun_conn_t *conn = zdtun_lookup(tun, &pkt.tuple, !is_tcp_established);
+                if (conn == nullptr) {
+                    log("zdtun_lookup error")
+                    continue;
+                }
+
                 int rv = zdtun_forward(tun, &pkt, conn);
+                if (rv != 0) {
+                    log("zdtun_forward error")
+                }
 
 //                log("data read : %s", pkt.l7)
             }
         } else {
             zdtun_handle_fd(tun, &rdfd, &wrfd);
         }
-    }
 
-//    pthread_exit(NULL);
+        zdtun_purge_expired(tun);
+    }
 }
 
 extern "C"
@@ -79,20 +111,29 @@ JNIEXPORT void JNICALL
 Java_com_krxkli_crackmm_core_PktProcessor_handleProcessPacket(JNIEnv *env, jobject thiz, jint fd) {
 // TODO: implement handleProcessPacket()
     log("handleProcessPacket")
+    // 保存 Env 状态
+    ::env = env;
+    ::vpn_processor_obj = thiz;
+    ::protect_socket_methodID = env->GetMethodID(env->GetObjectClass(vpn_processor_obj), "helpProtectSocket", "(I)Z");
+
 
     // 创建异步线程
     std::thread thread(handle_thread, fd);
     thread.detach();
-}
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_krxkli_crackmm_ActiveService_saveProtectMethod(JNIEnv *env, jobject thiz) {
-    log("saveProtectMethod")
 
-    // 缓存 jni 环境
-    ::env = env;
-    ::vpn_service_obj = thiz;
+    // 在主线程 protect_socket
+    while (true) {
+        std::unique_lock<std::mutex> lock(mtx);
 
-//    jmethodID methodID = env->GetMethodID(env->GetObjectClass(vpn_service_obj), "protectSocket", "(I)Z");
-//    jboolean ret = env->CallBooleanMethod(vpn_service_obj, methodID, 20);
+        while (!sockets_queue.empty()) {
+            process_competed = false;
+            int socket = sockets_queue.front();
+            do_protect_socket(socket);
+            sockets_queue.pop();
+            process_competed = true;
+            cv.notify_one();
+        }
+
+        cv.wait(lock);
+    }
 }

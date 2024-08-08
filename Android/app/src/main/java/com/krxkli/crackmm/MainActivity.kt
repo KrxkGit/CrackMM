@@ -44,16 +44,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVPNService() {
+        binding.activeKey.isEnabled = false
+        binding.textView.setText(getString(R.string.vpn_start_sucess))
+
         val intent = Intent(this, ActiveService::class.java)
         ContextCompat.startForegroundService(this, intent)
     }
 
-
-    /**
-     * A native method that is implemented by the 'crackmm' native library,
-     * which is packaged with this application.
-     */
-    external fun stringFromJNI(): String
 
     companion object {
         // Used to load the 'crackmm' library on application startup.

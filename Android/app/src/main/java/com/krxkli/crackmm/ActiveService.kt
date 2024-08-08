@@ -96,10 +96,9 @@ class ActiveService : VpnService() {
         val parcelFileDescriptor = builder.establish()
         this.vpnInterface = parcelFileDescriptor // 保存用于后续关闭
 
-        saveProtectMethod() // 保存 保护方法 到 Native 层
 
         if (parcelFileDescriptor != null) {
-            PktProcessor(parcelFileDescriptor.fd)
+            PktProcessor(parcelFileDescriptor.fd, this)
         }
 
     }
@@ -109,7 +108,4 @@ class ActiveService : VpnService() {
         this.protect(fd)
         return true
     }
-
-    external fun saveProtectMethod()
-
 }

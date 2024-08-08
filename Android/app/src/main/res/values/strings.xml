@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">CrackMM</string>
     <string name="active_text">Waiting to activate...</string>
+    <string name="vpn_start_sucess">VPN starts successfully</string>
 </resources>
