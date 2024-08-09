@@ -1,4 +1,5 @@
 #include <thread>
+#include <list>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -8,10 +9,11 @@ extern "C" {
 #include "zdtun.h"
 }
 
-int clientSocket_global = INVALID_SOCKET; // 保存，用于 select 使用
+std::list<int> clientSockets;
 char buf[PKT_BUF_SIZE]; // socket 读写缓冲区
 ssize_t total_request_len_global = 0;
 
+std::string response_connect = "HTTP/1.1 200 Connection established\r\n\r\n";
 
 std::string response = "HTTP/1.1 200 OK\n"
                        "Content-Type: text/html\n"
@@ -38,47 +40,61 @@ void handle_tcp_thread(int clientSocket) {
         error("setsockopt SO_KEEPALIVE failed[%d]: %s", errno, strerror(errno));
     }
 
-    ::clientSocket_global = clientSocket;
+    protect_socket(nullptr, clientSocket);
+    clientSockets.push_back(clientSocket);
 }
 
 void handle_activate_server_fd(fd_set *rdfd, fd_set *wrfd) {
-    if (clientSocket_global != INVALID_SOCKET && FD_ISSET(clientSocket_global, rdfd)) {
-        ssize_t total_request_len = 0;
+    for (auto clientSocket : clientSockets) {
 
-        while (true) {
-            ssize_t len = recv(clientSocket_global, buf, sizeof(buf), 0);
-            if (len <= 0) {
-                return;
+        if (clientSocket != INVALID_SOCKET && FD_ISSET(clientSocket, rdfd)) {
+            ssize_t total_request_len = 0;
+
+            while (true) {
+                ssize_t len = recv(clientSocket, buf, sizeof(buf), 0);
+                if (len <= 0) {
+                    continue;
+                }
+                total_request_len += len;
+                log("[activate] recv total_request_len_global: %zd", total_request_len);
+                log("[activate] recv success: %s", buf);
             }
-            total_request_len += len;
-            log("[activate] recv total_request_len_global: %zd", total_request_len);
-            log("[activate] recv success: %s", buf);
+        } else if (clientSocket != INVALID_SOCKET && FD_ISSET(clientSocket, wrfd)) {
+            size_t writeBytes = 0;
+            std::string request(buf, total_request_len_global);
+            total_request_len_global = 0;
+
+            size_t residue = response.length();
+            const char *response_buf = response.c_str();
+
+            if (request.find("CONNECT") != std::string::npos) {
+                log("[activate] send response_connect");
+                writeBytes = send(clientSocket, response_connect.c_str(),
+                                  response_connect.length(), 0);
+                memset(buf, 0, sizeof(buf));
+            } else if (request.find("GET /") != std::string::npos) {
+                log("[activate] send response");
+                writeBytes = send(clientSocket, response_buf, residue, 0);
+                memset(buf, 0, sizeof(buf));
+
+                close(clientSocket);
+                clientSockets.remove(clientSocket);
+            }
+            log("[activate] send response success: %zd", writeBytes);
         }
-    } else if (clientSocket_global != INVALID_SOCKET && FD_ISSET(clientSocket_global, wrfd)) {
-        size_t writeBytes = 0;
-        std::string request(buf, total_request_len_global);
-        total_request_len_global = 0;
-
-        size_t residue = response.length();
-        const char *response_buf = response.c_str();
-
-        if (request.find("GET /") != std::string::npos) {
-            log("[activate] send response");
-            writeBytes = send(clientSocket_global, response_buf, residue, 0);
-
-        }
-        log("[activate] send response success: %zd", writeBytes);
     }
 }
 
 void init_handle_activate_server_fd(int *max_fd, fd_set *rdfd, fd_set *wrfd) {
-    if (clientSocket_global != INVALID_SOCKET) {
-        FD_SET(clientSocket_global, rdfd);
-        if (total_request_len_global > 0) {
-            FD_SET(clientSocket_global, wrfd);
-        }
+    for (auto clientSocket : clientSockets) {
+        if (clientSocket != INVALID_SOCKET) {
+            FD_SET(clientSocket, rdfd);
+            if (total_request_len_global > 0) {
+                FD_SET(clientSocket, wrfd);
+            }
 
-        *max_fd = max(*max_fd, clientSocket_global);
+            *max_fd = max(*max_fd, clientSocket);
+        }
     }
 }
 

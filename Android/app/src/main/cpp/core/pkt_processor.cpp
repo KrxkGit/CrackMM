@@ -5,6 +5,7 @@
 
 extern "C" {
 #include "zdtun.h"
+#include "libActivateServer.h"
 }
 
 #include "cheat.h"
@@ -26,7 +27,6 @@ std::string target_exclude = "CONNECT";
 sockaddr_in target_addr = {0};
 bool hook_target = false;
 uint32_t activate_server_ip = inet_addr("127.0.0.1");
-bool already_created = false;
 // 打印区
 char sz_print[PKT_BUF_SIZE];
 
@@ -42,12 +42,13 @@ int data_in(zdtun_t *tun, zdtun_pkt_t *pkt, const zdtun_conn_t *conn_info) {
         pkt->l7[pkt->l7_len - 1] = '\0';
         log("data from activate server: %s\n", pkt->l7)
 
-        cheat_tcp_src(tun, pkt, target_addr.sin_addr.s_addr, target_addr.sin_port);
+        cheat_tcp_src(pkt, target_addr.sin_addr.s_addr, target_addr.sin_port);
 
         zdtun_pkt_t new_pkt = {0};
         zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
         log("cheat data route: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
     }
+//    cheat_http_reply(pkt);
 
     size_t byteWrite = write(tun_fd, pkt->buf, pkt->len);
     if (byteWrite < 0) {
@@ -94,19 +95,9 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt) {
             pkt->tuple.dst_port == target_addr.sin_port && pkt->tuple.ipproto == IPPROTO_TCP) {
 
 
-            log("Get Hook here: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, PKT_BUF_SIZE))
-
-            // 修改 IP 地址
-            cheat_tcp_dst(tun, pkt, activate_server_ip, htons(ACTIVATE_SERVER_PORT));
-
-            zdtun_pkt_t new_pkt = {0};
-            zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
-
-            log("ToNew: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
-
             // 转发到代理服务器
             uint8_t is_tcp_established =
-                    ((new_pkt.tuple.ipproto == IPPROTO_TCP) &&
+                    ((pkt->tuple.ipproto == IPPROTO_TCP) &&
                      (!(pkt->tcp->th_flags & TH_SYN) || (pkt->tcp->th_flags & TH_ACK)));
 
             // 从 SYN 包开始 Hook
@@ -114,13 +105,24 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt) {
                 return false;
             } else {
                 hook_target = true;
+                // TODO: 重新设为 false
             }
 
+            log("Get Hook here: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, PKT_BUF_SIZE))
+            // 修改 IP 地址
+            cheat_tcp_dst(pkt, activate_server_ip, htons(ACTIVATE_SERVER_PORT));
+
+            zdtun_pkt_t new_pkt = {0};
+            zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
+            log("ToNew: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
+
+            // 进行转发
             zdtun_conn_t *conn = zdtun_lookup(tun, &new_pkt.tuple, !is_tcp_established);
 
             log("Connection found: 0x%x, create is %d", new_pkt.tcp->th_flags, !is_tcp_established)
             if (conn == nullptr) {
-                log("Connection not found: 0x%x, create is %d", new_pkt.tcp->th_flags, !is_tcp_established)
+                log("Connection not found: 0x%x, create is %d", new_pkt.tcp->th_flags,
+                    !is_tcp_established)
                 return false;
             }
             int rv = zdtun_forward(tun, &new_pkt, conn);
@@ -141,7 +143,9 @@ void handle_thread(int fd) {
     log("fd = %d\n", fd)
     ::tun_fd = fd;
 
-    run_activate_server();
+//    run_activate_server();
+    std::thread golang_activate_server(runActivateServer);
+    golang_activate_server.detach();
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
@@ -158,7 +162,7 @@ void handle_thread(int fd) {
         fd_set wrfd;
         int max_fd = 0;
         zdtun_fds(tun, &max_fd, &rdfd, &wrfd);
-        init_handle_activate_server_fd(&max_fd, &rdfd, &wrfd);
+//        init_handle_activate_server_fd(&max_fd, &rdfd, &wrfd);
 
         FD_SET(fd, &rdfd);
         max_fd = max(fd, max_fd);;
@@ -178,7 +182,7 @@ void handle_thread(int fd) {
             zdtun_pkt_t pkt;
             zdtun_parse_pkt(tun, pkt_buf, len, &pkt);
 
-            // 激活播放器：如果为目标域名，直接构造回复包
+            // 激活播放器
             if (activate(tun, &pkt)) {
                 continue;
             }
@@ -201,7 +205,7 @@ void handle_thread(int fd) {
 
         } else {
             zdtun_handle_fd(tun, &rdfd, &wrfd);
-            handle_activate_server_fd(&rdfd, &wrfd);
+//            handle_activate_server_fd(&rdfd, &wrfd);
         }
 
         zdtun_purge_expired(tun);

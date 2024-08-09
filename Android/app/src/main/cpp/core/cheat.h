@@ -56,12 +56,15 @@ void protect_socket(zdtun_t *tun, socket_t socket);
 void run_activate_server();
 void build_cheat_pkt(zdtun_conn_cheat *conn_cheat, char *pktBuf, u_int16_t l4_len,
                      u_int16_t optsoff = 0);
-void cheat_tcp_dst(zdtun_t* tun , zdtun_pkt_t *pkt, uint32_t new_dst_ip, uint16_t new_dst_port);
-void cheat_tcp_src(zdtun_t* tun , zdtun_pkt_t *pkt, uint32_t new_src_ip, uint16_t new_src_port);
+void cheat_tcp_dst(zdtun_pkt_t *pkt, uint32_t new_dst_ip, uint16_t new_dst_port);
+void cheat_tcp_src(zdtun_pkt_t *pkt, uint32_t new_src_ip, uint16_t new_src_port);
+void cheat_http_content(zdtun_pkt_t *pkt, uint16_t new_http_len);
 
 /**
  * 下列集合用于激活服务器重用多路复用
  */
 void handle_activate_server_fd(fd_set* rdfd, fd_set* wrfd);
 void init_handle_activate_server_fd(int *max_fd, fd_set* rdfd, fd_set* wrfd);
+void cheat_http_reply(zdtun_pkt_t *pkt);
+
 #endif //CRACKMM_CHEAT_H

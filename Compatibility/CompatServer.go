@@ -33,5 +33,6 @@ func runActivateServer() {
 			log.Println(err.Error())
 		}
 		go handlers.HandleRegister(conn)
+		conn.SyscallConn().Control().Fd
 	}
 }
