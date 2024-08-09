@@ -5,12 +5,16 @@
 #ifndef CRACKMM_CHEAT_H
 #define CRACKMM_CHEAT_H
 
+extern "C" { ;
 #include "zdtun.h"
+}
+
+#define PKT_BUF_SIZE 65535
+#define ACTIVATE_SERVER_PORT 8080
 
 /**
  * 下列结构用于伪造回复
  */
-
 typedef struct zdtun_conn_cheat {
     zdtun_5tuple_t tuple;
     time_t tstamp;
@@ -33,8 +37,8 @@ typedef struct zdtun_conn_cheat {
             u_int8_t window_scale;   // client/zdtun TCP window scale
 
             struct {
-                uint8_t fin_ack_sent:1;
-                uint8_t client_closed:1;
+                uint8_t fin_ack_sent: 1;
+                uint8_t client_closed: 1;
             };
         } tcp;
     };
@@ -47,31 +51,17 @@ typedef struct zdtun_conn_cheat {
     char hh[40];  // tuple -> conn
 } zdtun_conn_cheat_t;
 
-PACK_ON
-struct iphdr
-{
-#if defined(_LITTLE_ENDIAN)
-    u_int8_t ihl:4;
-    u_int8_t version:4;
-#elif defined(_BIG_ENDIAN)
-    u_int8_t version:4;
-    u_int8_t ihl:4;
-#else
-#error "Please fix endianess"
-#endif
-    uint8_t tos;
-    uint16_t tot_len;
-    uint16_t id;
-    uint16_t frag_off;
-    uint8_t ttl;
-    uint8_t protocol;
-    uint16_t check;
-    uint32_t saddr;
-    uint32_t daddr;
-    /*The options start here. */
-} PACK_OFF;
 
-uint16_t calc_checksum(uint16_t start, const uint8_t *buffer, u_int16_t length);
-unsigned short calculateTCPChecksum(const uint8_t* data, uint16_t zdtun_help_checksum, int data_len);
+void protect_socket(zdtun_t *tun, socket_t socket);
+void run_activate_server();
+void build_cheat_pkt(zdtun_conn_cheat *conn_cheat, char *pktBuf, u_int16_t l4_len,
+                     u_int16_t optsoff = 0);
+void cheat_tcp_dst(zdtun_t* tun , zdtun_pkt_t *pkt, uint32_t new_dst_ip, uint16_t new_dst_port);
+void cheat_tcp_src(zdtun_t* tun , zdtun_pkt_t *pkt, uint32_t new_src_ip, uint16_t new_src_port);
 
+/**
+ * 下列集合用于激活服务器重用多路复用
+ */
+void handle_activate_server_fd(fd_set* rdfd, fd_set* wrfd);
+void init_handle_activate_server_fd(int *max_fd, fd_set* rdfd, fd_set* wrfd);
 #endif //CRACKMM_CHEAT_H

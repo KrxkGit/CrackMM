@@ -9,8 +9,6 @@ extern "C" {
 
 #include "cheat.h"
 
-#define PKT_BUF_SIZE 65535
-
 // VPN 描述符
 int tun_fd;
 // JVM 变量缓存区
@@ -25,13 +23,33 @@ volatile bool process_competed = false;
 // 激活区
 std::string target_domain = "rz.protect-file.com";
 std::string target_exclude = "CONNECT";
+sockaddr_in target_addr = {0};
+bool hook_target = false;
+uint32_t activate_server_ip = inet_addr("127.0.0.1");
+bool already_created = false;
+// 打印区
+char sz_print[PKT_BUF_SIZE];
 
 void do_protect_socket(int socket) {
     jboolean ret = env->CallBooleanMethod(vpn_processor_obj, protect_socket_methodID, socket);
 }
 
 int data_in(zdtun_t *tun, zdtun_pkt_t *pkt, const zdtun_conn_t *conn_info) {
-    int byteWrite = write(tun_fd, pkt->buf, pkt->len);
+    if (pkt->tuple.src_ip.ip4 == activate_server_ip &&
+        pkt->tuple.src_port == htons(ACTIVATE_SERVER_PORT)) {
+        log("data form activate server len: %hu %hu %hu %hu", pkt->len, pkt->ip_hdr_len,
+            pkt->l4_hdr_len, pkt->l7_len)
+        pkt->l7[pkt->l7_len - 1] = '\0';
+        log("data from activate server: %s\n", pkt->l7)
+
+        cheat_tcp_src(tun, pkt, target_addr.sin_addr.s_addr, target_addr.sin_port);
+
+        zdtun_pkt_t new_pkt = {0};
+        zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
+        log("cheat data route: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
+    }
+
+    size_t byteWrite = write(tun_fd, pkt->buf, pkt->len);
     if (byteWrite < 0) {
         log("write error\n")
         return -1;
@@ -49,131 +67,81 @@ void protect_socket(zdtun_t *tun, socket_t socket) {
 }
 
 bool activate(zdtun_t *tun, zdtun_pkt_t *pkt) {
-    // 解析域名
-    int l7_len = pkt->l7_len;
-    if (l7_len > 0) {
-        // 分析是否包含 目标域名
-        std::string l7_buf(pkt->l7, l7_len);
+    if (target_addr.sin_addr.s_addr == 0 || target_addr.sin_port == 0) {
+        int l7_len = pkt->l7_len;
+        if (l7_len > 0) {
+            // 分析是否包含 目标域名
+            std::string l7_buf(pkt->l7, l7_len);
 
-        if (l7_buf.find(target_exclude) != std::string::npos) { // 排除 CONNECT 请求
+            if (l7_buf.find(target_domain) != std::string::npos &&
+                l7_buf.find("GET") != std::string::npos) {
+                log("From: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, pkt->len))
+
+                if (target_addr.sin_addr.s_addr == 0 && !hook_target) { // 首次拦截，先记录目标 IP 地址，后续直接使用
+                    target_addr.sin_addr.s_addr = pkt->tuple.dst_ip.ip4;
+                    target_addr.sin_port = pkt->tuple.dst_port;
+
+                    log("hook: %s", inet_ntoa(target_addr.sin_addr));
+                    return false;
+                }
+            }
+            return false;
+        } else {
             return false;
         }
+    } else {
+        if (pkt->tuple.dst_ip.ip4 == target_addr.sin_addr.s_addr &&
+            pkt->tuple.dst_port == target_addr.sin_port && pkt->tuple.ipproto == IPPROTO_TCP) {
 
-        if (l7_buf.find(target_domain) != std::string::npos && l7_buf.find("GET") != std::string::npos) {
-            // 构造回复包
-            log("%s", pkt->l7)
 
-//            // 构造 HTTP 数据
-//            std::string replyStr = "HTTP/1.1 200 OK\n"
-//                                "Content-Type: text/html\n"
-//                                "Server: Microsoft-IIS/10.0\n"
-//                                "Set-Cookie: ASPSESSIONIDSSDBBSDB=FJDLOIFCOPDJLPIEBAKMIICK; path=/\n"
-//                                "Content-Length: 91\n"
-//                                "Connection: keep-alive\n"
-//                                "Date: Sat, 03 Feb 2024 14:07:27 GMT\n"
-//                                "Cache-Control: max-age=0\n"
-//                                "EO-LOG-UUID: 11455388245916591360\n"
-//                                "EO-Cache-Status: MISS\n"
-//                                "\n"
-//                                "AAAAAA474B052F13794348074E005A76B91618771B00CA7309664D|0|||7ab6985c15c307f05303e8596765b79c";
-//
-//            char* reply = new char[replyStr.length()];
-//            strcpy(reply, replyStr.c_str());
-//
-//            char sz_print[PKT_BUF_SIZE];
-//            log("Send: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, pkt->len))
-//
-////            pkt->len = pkt->len - pkt->l7_len + replyStr.length();
-////            pkt->l7_len = replyStr.length();
-//            uint16_t new_len = pkt->len - pkt->l7_len + replyStr.length();
-//            char *buf = new char[new_len];
-//            memset(buf, 0, new_len);
-//
-//            u_int16_t offset = 0;
-//            memcpy(buf, pkt->l3, pkt->ip_hdr_len);
-//
-//            offset += pkt->ip_hdr_len;
-//            memcpy(buf + offset, pkt->l4, pkt->l4_hdr_len);
-//
-//            offset += pkt->l4_hdr_len;
-//            memcpy(buf + offset, reply, replyStr.length());
-//
-//            uint16_t total_len = offset + static_cast<uint16_t>(replyStr.length());
-//
-//            // 修改 IP 头部
-//            iphdr *iph = reinterpret_cast<iphdr *>(buf);
-//            iph->version = pkt->tuple.ipver;
-//            iph->saddr = pkt->tuple.dst_ip.ip4;
-//            iph->daddr = pkt->tuple.src_ip.ip4;
-//            iph->tot_len = htons(total_len);
-//            iph->frag_off = 0;
-//            iph->ihl = 5;
-//            iph->tos = 0;
-//            iph->ttl = 64;
-//            iph->id = htons(0);
-//            iph->protocol = IPPROTO_TCP;
-//            iph->check = ~calc_checksum(0, reinterpret_cast<u_int8_t *>(buf), sizeof (iphdr));
-//
-//            // 修改 TCP 头部
-//            auto *tcp_header = reinterpret_cast<tcphdr *>(buf + pkt->ip_hdr_len);
-//            tcp_header->doff = 5;
-//            tcp_header->th_sport = pkt->tuple.dst_port;
-//            tcp_header->th_dport = pkt->tuple.src_port;
-//            tcp_header->th_flags = TH_ACK | TH_PUSH;
-//            tcp_header->seq = htons(1);
-//            tcp_header->ack_seq = htons(ntohs(tcp_header->seq) + pkt->len - pkt->ip_hdr_len - pkt->l4_hdr_len);
-//            tcp_header->check = calculateTCPChecksum(reinterpret_cast<uint8_t *>(buf + offset), iph->check, replyStr.length());
-//
-//            write(tun_fd, buf, total_len);
-//
-//            zdtun_pkt_t reply_pkt;
-//            zdtun_parse_pkt(tun, buf, pkt->len, &reply_pkt);
-//
-//            log("Reply: %s", zdtun_5tuple2str(&reply_pkt.tuple, sz_print, total_len))
-//            log("Reply content: %s", reply_pkt.l7)
-//
-//            delete[]buf;
-//            delete[]reply;
+            log("Get Hook here: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, PKT_BUF_SIZE))
 
-            // 修改 IP 头部
-            iphdr *iph = reinterpret_cast<iphdr *>(pkt->buf);
-            iph->daddr = iph->saddr;
-            iph->check = ~calc_checksum(0, reinterpret_cast<u_int8_t *>(pkt->buf), sizeof (iphdr));
-            // 修改 TCP 头部
-            auto *tcp_header = reinterpret_cast<tcphdr *>(pkt->buf + pkt->ip_hdr_len);
-            tcp_header->th_dport = htons(8080);
-//            tcp_header->check = calculateTCPChecksum(reinterpret_cast<uint8_t *>(pkt->buf + pkt->ip_hdr_len), iph->check, pkt->len - pkt->ip_hdr_len - pkt->l4_hdr_len);
+            // 修改 IP 地址
+            cheat_tcp_dst(tun, pkt, activate_server_ip, htons(ACTIVATE_SERVER_PORT));
 
-            zdtun_pkt_t new_pkt;
+            zdtun_pkt_t new_pkt = {0};
             zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
 
-            char sz_print[PKT_BUF_SIZE];
-            log("To: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, new_pkt.len))
+            log("ToNew: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
 
             // 转发到代理服务器
             uint8_t is_tcp_established =
-                    ((pkt->tuple.ipproto == IPPROTO_TCP) && (!(pkt->tcp->th_flags & TH_SYN) || (pkt->tcp->th_flags & TH_ACK)));
-            zdtun_conn_t* conn = zdtun_lookup(tun, &new_pkt.tuple,  !is_tcp_established);
+                    ((new_pkt.tuple.ipproto == IPPROTO_TCP) &&
+                     (!(pkt->tcp->th_flags & TH_SYN) || (pkt->tcp->th_flags & TH_ACK)));
 
+            // 从 SYN 包开始 Hook
+            if (is_tcp_established && !hook_target) {
+                return false;
+            } else {
+                hook_target = true;
+            }
+
+            zdtun_conn_t *conn = zdtun_lookup(tun, &new_pkt.tuple, !is_tcp_established);
+
+            log("Connection found: 0x%x, create is %d", new_pkt.tcp->th_flags, !is_tcp_established)
             if (conn == nullptr) {
-                log("Connection not found")
-                return true;
+                log("Connection not found: 0x%x, create is %d", new_pkt.tcp->th_flags, !is_tcp_established)
+                return false;
             }
             int rv = zdtun_forward(tun, &new_pkt, conn);
+
+            log("ToActivateServer")
             if (rv != 0) {
                 log("zdtun_forward error")
-                return true;
+                zdtun_conn_close(tun, conn, CONN_STATUS_ERROR);
+                return false;
             }
-
             return true;
         }
+        return false;
     }
-    return false;
 }
 
 void handle_thread(int fd) {
     log("fd = %d\n", fd)
     ::tun_fd = fd;
+
+    run_activate_server();
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
@@ -190,6 +158,7 @@ void handle_thread(int fd) {
         fd_set wrfd;
         int max_fd = 0;
         zdtun_fds(tun, &max_fd, &rdfd, &wrfd);
+        init_handle_activate_server_fd(&max_fd, &rdfd, &wrfd);
 
         FD_SET(fd, &rdfd);
         max_fd = max(fd, max_fd);;
@@ -219,6 +188,7 @@ void handle_thread(int fd) {
                      (!(pkt.tcp->th_flags & TH_SYN) || (pkt.tcp->th_flags & TH_ACK)));
 
             zdtun_conn_t *conn = zdtun_lookup(tun, &pkt.tuple, !is_tcp_established);
+
             if (conn == nullptr) {
                 log("zdtun_lookup error")
                 continue;
@@ -231,6 +201,7 @@ void handle_thread(int fd) {
 
         } else {
             zdtun_handle_fd(tun, &rdfd, &wrfd);
+            handle_activate_server_fd(&rdfd, &wrfd);
         }
 
         zdtun_purge_expired(tun);

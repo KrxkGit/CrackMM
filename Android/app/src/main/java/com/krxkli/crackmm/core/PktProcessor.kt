@@ -20,8 +20,8 @@ class PktProcessor(vpnTun : Int, activeService: ActiveService) {
         val that = this
         // 处理 VPN 数据包
         GlobalScope.launch {
-            val activateServer = ActivateServer(that)
-            activateServer.run()
+//            val activateServer = ActivateServer(that)
+//            activateServer.run()
             handleProcessPacket(fd)
         }
     }

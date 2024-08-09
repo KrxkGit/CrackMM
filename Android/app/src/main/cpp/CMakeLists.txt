@@ -39,6 +39,8 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
         native-lib.cpp
         core/pkt_processor.cpp
         core/checksum.cpp
+        core/activate_server.cpp
+        core/cheat.cpp
 )
 
 # Activate Server
