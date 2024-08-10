@@ -23,6 +23,7 @@ std::queue<int> sockets_queue;
 volatile bool process_competed = false;
 // 激活区
 std::string target_domain = "rz.protect-file.com";
+int hook_progress = 0;
 std::string target_exclude = "CONNECT";
 sockaddr_in target_addr = {0};
 bool hook_target = false;
@@ -35,21 +36,6 @@ void do_protect_socket(int socket) {
 }
 
 int data_in(zdtun_t *tun, zdtun_pkt_t *pkt, const zdtun_conn_t *conn_info) {
-    if (pkt->tuple.src_ip.ip4 == activate_server_ip &&
-        pkt->tuple.src_port == htons(ACTIVATE_SERVER_PORT)) {
-        log("data form activate server len: %hu %hu %hu %hu", pkt->len, pkt->ip_hdr_len,
-            pkt->l4_hdr_len, pkt->l7_len)
-        pkt->l7[pkt->l7_len - 1] = '\0';
-        log("data from activate server: %s\n", pkt->l7)
-
-        cheat_tcp_src(pkt, target_addr.sin_addr.s_addr, target_addr.sin_port);
-
-        zdtun_pkt_t new_pkt = {0};
-        zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
-        log("cheat data route: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
-    }
-//    cheat_http_reply(pkt);
-
     size_t byteWrite = write(tun_fd, pkt->buf, pkt->len);
     if (byteWrite < 0) {
         log("write error\n")
@@ -67,7 +53,7 @@ void protect_socket(zdtun_t *tun, socket_t socket) {
     cv.wait(lock, [] { return process_competed; });
 }
 
-bool activate(zdtun_t *tun, zdtun_pkt_t *pkt) {
+bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
     if (target_addr.sin_addr.s_addr == 0 || target_addr.sin_port == 0) {
         int l7_len = pkt->l7_len;
         if (l7_len > 0) {
@@ -76,12 +62,11 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt) {
 
             if (l7_buf.find(target_domain) != std::string::npos &&
                 l7_buf.find("GET") != std::string::npos) {
-                log("From: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, pkt->len))
-
-                if (target_addr.sin_addr.s_addr == 0 && !hook_target) { // 首次拦截，先记录目标 IP 地址，后续直接使用
+                if (target_addr.sin_addr.s_addr == 0) { // 首次拦截，先记录目标 IP 地址，后续使用
                     target_addr.sin_addr.s_addr = pkt->tuple.dst_ip.ip4;
                     target_addr.sin_port = pkt->tuple.dst_port;
 
+                    hook_progress = 0;
                     log("hook: %s", inet_ntoa(target_addr.sin_addr));
                     return false;
                 }
@@ -94,48 +79,61 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt) {
         if (pkt->tuple.dst_ip.ip4 == target_addr.sin_addr.s_addr &&
             pkt->tuple.dst_port == target_addr.sin_port && pkt->tuple.ipproto == IPPROTO_TCP) {
 
+            uint32_t reply_len = 0;
+            char *reply_buf;
+            size_t write_reply_len = 0;
 
-            // 转发到代理服务器
-            uint8_t is_tcp_established =
-                    ((pkt->tuple.ipproto == IPPROTO_TCP) &&
-                     (!(pkt->tcp->th_flags & TH_SYN) || (pkt->tcp->th_flags & TH_ACK)));
-
-            // 从 SYN 包开始 Hook
-            if (is_tcp_established && !hook_target) {
+            // 从 SYN 包开始捕获
+            if (!(pkt->tcp->th_flags & TH_SYN) && hook_progress == 0) {
                 return false;
+            }
+            uint8_t flags = pkt->tcp->th_flags;
+            if (flags & TH_SYN) {
+                hook_progress += 1;
+                log("Recv SYN here: 0x%x, len: %hu", pkt->tcp->th_flags, pkt->len)
+                reply_buf = cheat_reply_SYN(pkt, &reply_len);
+                write_reply_len = write(tun_fd, reply_buf, reply_len);
+                if (write_reply_len >= reply_len) {
+                    log("write SYN | ACK: need: %u actual: %zd\n", reply_len,
+                        write_reply_len)
+                }
+                delete[]reply_buf;
+            } else if (flags & TH_ACK && !(flags & TH_PUSH) && !(flags & TH_FIN)) {
+                hook_progress += 1;
+                log("Recv ACK here: 0x%x, len: %hu", pkt->tcp->th_flags, pkt->len)
+                reply_buf = cheat_reply_ACK(pkt, &reply_len);
+                if (reply_buf == nullptr) {
+                    // nothing to do
+                }
+            } else if (flags & TH_PUSH && flags & TH_ACK) {
+                hook_progress += 1;
+                log("Recv HTTP Request here : 0x%x, len: %hu %hu %hu", pkt->tcp->th_flags,
+                    pkt->len, pkt->l4_hdr_len, pkt->l7_len)
+                log("Recv: %s", origin_data + 20)
+                reply_buf = cheat_reply_ACK(pkt, &reply_len);
+                write_reply_len = write(tun_fd, reply_buf, reply_len);
+                if (write_reply_len >= reply_len) {
+                    log("write HTTP Response: need: %u actual: %zd\n", reply_len,
+                        write_reply_len)
+                }
+                delete[]reply_buf;
+            } else if (flags & TH_FIN && flags & TH_ACK) {
+                hook_progress = 0;
+                log("Recv FIN here : 0x%x, len: %hu", pkt->tcp->th_flags, pkt->len)
+                reply_buf = cheat_reply_TCP_FIN(pkt, &reply_len);
+                write_reply_len = write(tun_fd, reply_buf, reply_len);
+                if (write_reply_len >= reply_len) {
+                    log("write ACK | FIN: need: %u actual: %zd\n", reply_len,
+                        write_reply_len)
+                }
+                delete[]reply_buf;
             } else {
-                hook_target = true;
-                // TODO: 重新设为 false
-            }
-
-            log("Get Hook here: %s", zdtun_5tuple2str(&pkt->tuple, sz_print, PKT_BUF_SIZE))
-            // 修改 IP 地址
-            cheat_tcp_dst(pkt, activate_server_ip, htons(ACTIVATE_SERVER_PORT));
-
-            zdtun_pkt_t new_pkt = {0};
-            zdtun_parse_pkt(tun, pkt->buf, pkt->len, &new_pkt);
-            log("ToNew: %s", zdtun_5tuple2str(&new_pkt.tuple, sz_print, PKT_BUF_SIZE))
-
-            // 进行转发
-            zdtun_conn_t *conn = zdtun_lookup(tun, &new_pkt.tuple, !is_tcp_established);
-
-            log("Connection found: 0x%x, create is %d", new_pkt.tcp->th_flags, !is_tcp_established)
-            if (conn == nullptr) {
-                log("Connection not found: 0x%x, create is %d", new_pkt.tcp->th_flags,
-                    !is_tcp_established)
-                return false;
-            }
-            int rv = zdtun_forward(tun, &new_pkt, conn);
-
-            log("ToActivateServer")
-            if (rv != 0) {
-                log("zdtun_forward error")
-                zdtun_conn_close(tun, conn, CONN_STATUS_ERROR);
-                return false;
+                log("Recv other here : 0x%x, len: %hu", pkt->tcp->th_flags, pkt->len)
             }
             return true;
+        } else {
+            return false;
         }
-        return false;
     }
 }
 
@@ -143,9 +141,6 @@ void handle_thread(int fd) {
     log("fd = %d\n", fd)
     ::tun_fd = fd;
 
-//    run_activate_server();
-    std::thread golang_activate_server(runActivateServer);
-    golang_activate_server.detach();
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
@@ -162,7 +157,6 @@ void handle_thread(int fd) {
         fd_set wrfd;
         int max_fd = 0;
         zdtun_fds(tun, &max_fd, &rdfd, &wrfd);
-//        init_handle_activate_server_fd(&max_fd, &rdfd, &wrfd);
 
         FD_SET(fd, &rdfd);
         max_fd = max(fd, max_fd);;
@@ -172,7 +166,7 @@ void handle_thread(int fd) {
         if (FD_ISSET(fd, &rdfd)) {
             char pkt_buf[PKT_BUF_SIZE];
 
-            int len = read(fd, pkt_buf, PKT_BUF_SIZE);
+            size_t len = read(fd, pkt_buf, PKT_BUF_SIZE);
 
             if (len <= 0) {
                 log("read error")
@@ -183,7 +177,7 @@ void handle_thread(int fd) {
             zdtun_parse_pkt(tun, pkt_buf, len, &pkt);
 
             // 激活播放器
-            if (activate(tun, &pkt)) {
+            if (activate(tun, &pkt, pkt_buf)) {
                 continue;
             }
 
@@ -205,7 +199,6 @@ void handle_thread(int fd) {
 
         } else {
             zdtun_handle_fd(tun, &rdfd, &wrfd);
-//            handle_activate_server_fd(&rdfd, &wrfd);
         }
 
         zdtun_purge_expired(tun);

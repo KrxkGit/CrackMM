@@ -89,7 +89,7 @@ class ActiveService : VpnService() {
     private fun setupVPN() {
         val builder = Builder()
         builder.setSession("CrackMM VPN")
-        builder.addAddress("10.0.0.1", 24)
+        builder.addAddress("10.215.173.1", 24)
         builder.addRoute("0.0.0.0", 0)
         builder.setMtu(1500)
 

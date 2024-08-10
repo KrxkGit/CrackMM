@@ -67,4 +67,34 @@ void handle_activate_server_fd(fd_set* rdfd, fd_set* wrfd);
 void init_handle_activate_server_fd(int *max_fd, fd_set* rdfd, fd_set* wrfd);
 void cheat_http_reply(zdtun_pkt_t *pkt);
 
+/**
+ * 自行构造 TCP 回复包
+ */
+struct ippseudo {
+    uint32_t ippseudo_src;    /* source internet address */
+    uint32_t ippseudo_dst;    /* destination internet address */
+    u_int8_t ippseudo_pad;    /* pad, must be zero */
+    u_int8_t ippseudo_p;      /* protocol */
+    u_int16_t ippseudo_len;	  /* protocol length */
+};
+
+// TCP选项结构体
+struct tcp_option {
+    uint8_t kind;    // 选项类型
+    uint8_t length;  // 选项长度
+    char* data;  // 选项数据
+};
+
+/**
+ * 构造 TCP SYN 回复包
+ * 请 自行释放包的内存，释放请使用 delete
+ * @param pkt
+ * @param reply_len
+ * @return
+ */
+char* cheat_reply_SYN(zdtun_pkt_t *pkt, uint32_t* reply_len);
+char* cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t* reply_len);
+int cheat_reply_TCP_HTTP(char* http_response);
+char* cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len);
+
 #endif //CRACKMM_CHEAT_H
