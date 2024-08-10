@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">星空激活神器</string>
+    <string name="active_text">等待激活状态...</string>
+    <string name="vpn_start_sucess">VPN 启动成功</string>
+</resources>
