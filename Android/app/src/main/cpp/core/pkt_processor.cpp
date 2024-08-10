@@ -5,7 +5,6 @@
 
 extern "C" {
 #include "zdtun.h"
-#include "libActivateServer.h"
 }
 
 #include "cheat.h"
@@ -110,7 +109,6 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                 hook_progress += 1;
                 log("Recv HTTP Request here : 0x%x, len: %hu %hu %hu", pkt->tcp->th_flags,
                     pkt->len, pkt->l4_hdr_len, pkt->l7_len)
-//                log("Recv: %s", pkt->l7)
                 reply_buf = cheat_reply_ACK(pkt, &reply_len, &reply_http_len);
                 write_reply_len = write(tun_fd, reply_buf, reply_len);
                 if (write_reply_len >= reply_len) {

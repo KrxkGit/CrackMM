@@ -36,23 +36,10 @@ include_directories(${zdtun_path})
 # core
 add_library(${CMAKE_PROJECT_NAME} SHARED
         # List C/C++ source files with relative paths to this CMakeLists.txt.
-        native-lib.cpp
         core/pkt_processor.cpp
-        core/checksum.cpp
-        core/activate_server.cpp
         core/cheat.cpp
 )
 
-# Activate Server
-set(HEADER_PATH ${CMAKE_SOURCE_DIR}/../../../../../Compatibility/out/)
-include_directories(${HEADER_PATH}) # 包含 头文件
-
-# 将库添加到 jniLibs 目录下，保证会自动拷贝到 apk 包
-set(Compatibility_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/arm64-v8a)
-add_library(Compatibility SHARED IMPORTED)
-set_property(TARGET Compatibility PROPERTY IMPORTED_NO_SONAME 1)
-set_target_properties(Compatibility PROPERTIES IMPORTED_LOCATION ${Compatibility_DIR}/libActivateServer.so)
-include_directories(${Compatibility_DIR})
 
 # Specifies libraries CMake should link to your target library. You
 # can link libraries from various origins, such as libraries defined in this
@@ -61,5 +48,4 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
         # List libraries link to the target library
         android
         log
-        Compatibility
         zdtun)

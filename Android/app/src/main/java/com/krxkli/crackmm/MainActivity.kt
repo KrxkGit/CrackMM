@@ -17,11 +17,12 @@ class MainActivity : AppCompatActivity() {
     /**
      * 用于等待申请运行时 VPN 权限结果
      */
-    private val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
-        if (resultCode.resultCode == Activity.RESULT_OK) {
-            startVPNService()
+    private val launcher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { resultCode ->
+            if (resultCode.resultCode == Activity.RESULT_OK) {
+                startVPNService()
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

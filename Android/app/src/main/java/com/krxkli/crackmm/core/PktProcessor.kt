@@ -5,8 +5,9 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
-class PktProcessor(vpnTun : Int, activeService: ActiveService) {
-    private var activeService : ActiveService? = null
+class PktProcessor(vpnTun: Int, activeService: ActiveService) {
+    private var activeService: ActiveService? = null
+
     init {
         /**
          * 保存 VPN 文件描述符句柄
@@ -17,17 +18,14 @@ class PktProcessor(vpnTun : Int, activeService: ActiveService) {
 
     @OptIn(DelicateCoroutinesApi::class)
     private fun handleProcessPacketThread(fd: Int) {
-        val that = this
         // 处理 VPN 数据包
         GlobalScope.launch {
-//            val activateServer = ActivateServer(that)
-//            activateServer.run()
             handleProcessPacket(fd)
         }
     }
 
     // 供 C++ 调用
-    fun helpProtectSocket(fd : Int) : Boolean {
+    fun helpProtectSocket(fd: Int): Boolean {
         // 保护 socket
         return this.activeService?.protectSocket(fd) ?: false
     }

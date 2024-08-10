@@ -3,120 +3,16 @@
 #include "cheat.h"
 #include "third_party/net_headers.h"
 
-uint8_t ipver = 4;
-size_t IPV4_HEADER_LEN = 20;
-size_t IPV6_HEADER_LEN = 40;
-size_t TCP_HEADER_LEN = 20;
-
+size_t TCP_HEADER_LEN = 20; // 无选项的 TCP 头部长度
 uint32_t next_seq = 2011920363; // 下一次发包使用的序列号
-
-void build_cheat_pkt(zdtun_conn_cheat *conn_cheat, char *pktBuf, u_int16_t l4_len,
-                     u_int16_t optsoff) {
-
-    zdtun_conn_t *conn = reinterpret_cast<zdtun_conn_t *>(conn_cheat);
-
-    int iphdr_len = (ipver == 4) ? IPV4_HEADER_LEN : IPV6_HEADER_LEN;
-
-    const u_int16_t l3_len = l4_len + TCP_HEADER_LEN + (optsoff * 4);
-    struct tcphdr *tcp = (struct tcphdr *) &pktBuf[iphdr_len];
-
-    tcp->th_sport = conn_cheat->tuple.dst_port;
-    tcp->th_dport = conn_cheat->tuple.src_port;
-
-    zdtun_make_iphdr(nullptr, conn, pktBuf, l3_len);
-    tcp->th_sum = zdtun_l3_checksum(nullptr, conn, pktBuf, (char *) tcp, l3_len);
-}
-
-void cheat_tcp_dst(zdtun_pkt_t *pkt, uint32_t new_dst_ip, uint16_t new_dst_port) {
-    zdtun_conn_cheat_t connCheat = {0};
-    connCheat.tuple.ipver = pkt->tuple.ipver;
-    connCheat.tuple.ipproto = pkt->tuple.ipproto;
-    connCheat.tuple.dst_ip = pkt->tuple.src_ip;
-    connCheat.tuple.src_ip.ip4 = new_dst_ip;
-    connCheat.tuple.dst_port = pkt->tuple.src_port;
-    connCheat.tuple.src_port = new_dst_port;
-
-    uint16_t l4_len = pkt->l7_len;
-    l4_len = l4_len > 0 ? l4_len : 0;
-
-    uint16_t optsoff = (pkt->l4_hdr_len - TCP_HEADER_LEN) / 4;
-    optsoff = optsoff < 0 ? 0 : optsoff;
-
-    build_cheat_pkt(&connCheat, pkt->buf, l4_len, optsoff);
-}
-
-void cheat_http_content(zdtun_pkt_t *pkt, uint16_t new_http_len) {
-    zdtun_conn_cheat_t connCheat = {0};
-    connCheat.tuple.ipver = pkt->tuple.ipver;
-    connCheat.tuple.ipproto = pkt->tuple.ipproto;
-    connCheat.tuple.dst_ip = pkt->tuple.src_ip;
-    connCheat.tuple.src_ip = pkt->tuple.dst_ip;
-    connCheat.tuple.dst_port = pkt->tuple.src_port;
-    connCheat.tuple.src_port = pkt->tuple.dst_port;
-
-    uint16_t l4_len = new_http_len;
-    l4_len = l4_len > 0 ? l4_len : 0;
-
-    uint16_t optsoff = (pkt->l4_hdr_len - TCP_HEADER_LEN) / 4;
-    optsoff = optsoff < 0 ? 0 : optsoff;
-
-    build_cheat_pkt(&connCheat, pkt->buf, l4_len, optsoff);
-}
-
-void cheat_tcp_src(zdtun_pkt_t *pkt, uint32_t new_src_ip, uint16_t new_src_port) {
-    zdtun_conn_cheat_t connCheat = {0};
-    connCheat.tuple.ipver = pkt->tuple.ipver;
-    connCheat.tuple.ipproto = pkt->tuple.ipproto;
-    connCheat.tuple.dst_ip.ip4 = new_src_ip;
-    connCheat.tuple.src_ip = pkt->tuple.dst_ip;
-    connCheat.tuple.dst_port = new_src_port;
-    connCheat.tuple.src_port = pkt->tuple.dst_port;
-
-    uint16_t l4_len = pkt->l7_len;
-    l4_len = l4_len > 0 ? l4_len : 0;
-
-    uint16_t optsoff = (pkt->l4_hdr_len - TCP_HEADER_LEN) / 4;
-    optsoff = optsoff < 0 ? 0 : optsoff;
-
-    build_cheat_pkt(&connCheat, pkt->buf, l4_len, optsoff);
-}
-
-void cheat_http_reply(zdtun_pkt_t *pkt) {
-
-    std::string error_activate(pkt->l7, pkt->l7_len);
-    log("%s", pkt->l7);
-    if (error_activate.find("Error") != std::string::npos) {
-        log("start cheat\n");
-
-        std::string response = "HTTP/1.1 200 OK\n"
-                               "Content-Type: text/html\n"
-                               "Server: Microsoft-IIS/10.0\n"
-                               "Set-Cookie: ASPSESSIONIDSSDBBSDB=FJDLOIFCOPDJLPIEBAKMIICK; path=/\n"
-                               "Content-Length: 91\n"
-                               "Connection: keep-alive\n"
-                               "Date: Sat, 03 Feb 2024 14:07:27 GMT\n"
-                               "Cache-Control: max-age=0\n"
-                               "EO-LOG-UUID: 11455388245916591360\n"
-                               "EO-Cache-Status: MISS\n"
-                               "\n"
-                               "AAAAAA474B052F13794348074E005A76B91618771B00CA7309664D|0|||7ab6985c15c307f05303e8596765b79c";
-
-        char *http = (char *) &pkt->buf[pkt->len - pkt->l7_len];
-        memcpy(http, response.c_str(), response.size());
-
-        cheat_http_content(pkt, response.size());
-
-        log("%s", pkt->l7);
-
-        return;
-    }
-}
 
 
 /**
- * 手动构造 TCP 通信回复
+ * 计算16位校验和
+ * @param data 数据
+ * @param length 数据长度
+ * @return
  */
-// 计算16位校验和
 uint16_t calculateChecksum(const uint16_t *data, int length) {
     uint32_t sum = 0;
     while (length > 1) {
@@ -141,7 +37,7 @@ build_pseudo_header(uint16_t tcp_total_len, uint32_t src_ip, uint32_t dst_ip, ui
     pseudo->ippseudo_dst = dst_ip;
     pseudo->ippseudo_pad = 0;
     pseudo->ippseudo_p = protocol;
-    pseudo->ippseudo_len = htons(tcp_total_len); // TODO: TCP/UDP 总长度
+    pseudo->ippseudo_len = htons(tcp_total_len); // TCP/UDP 总长度
 
     return pseudo;
 }
@@ -176,6 +72,11 @@ calculate_tcp_Checksum(const uint16_t *tcp_data, uint32_t src_ip, uint32_t dst_i
     return checksum;
 }
 
+/**
+ * 以十六进制答应数据
+ * @param array
+ * @param length
+ */
 void printHex(const char *array, size_t length) {
     char *sz_print = new char[length];
     memset(sz_print, 0, length);
@@ -275,7 +176,17 @@ char *cheat_reply_SYN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     return buf;
 }
 
-char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len_ack, uint32_t *reply_len_http) { // ack 有 2 次，分别 在 HTTP 前与 HTTP 后
+
+/**
+ * 构造 ACK 回复包
+ * 请 自行释放包的内存，释放请使用 delete
+ * @param reply_len_ack ACK 的长度
+ * @param reply_len_http 包含 HTTP 的 ACK 回复长度
+ * 注意： 本函数返个两次 TCP 包(合并为 1 个)，请调用两次 write (形成时间差)，否则无法被读取
+ * @return
+ */
+char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len_ack,
+                      uint32_t *reply_len_http) { // ack 有 2 次，分别 在 HTTP 前与 HTTP 后
     if (pkt->l7_len == 0) { // 无 HTTP 内容，为 TCP 第三次握手，可直接忽略
         *reply_len_ack = 0;
         log("reply empty here.")
@@ -329,7 +240,7 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len_ack, uint32_t *reply
         *reply_len_ack = ntohs(ip->tot_len);
         uint32_t temp = *reply_len_ack; // 保存第一阶段长度
 
-        // 继续填充 HTTP Response TODO: HTTP response 异常
+        // 继续填充 HTTP Response (注意： 必须分两次发送，即必须存在时间差)
         char *http_buf = buf + (*reply_len_ack);
 
         // 填充 ip 头部
@@ -388,45 +299,13 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len_ack, uint32_t *reply
     }
 }
 
-int cheat_reply_TCP_HTTP(char *http_response) {
-    // 注意 HTTP Response 回复长度不要超过 在单个 IP 包中能容纳的范围
-    char response[] = "HTTP/1.1 200 OK\r\n"
-                       "Content-Type: text/html\r\n"
-                       "Server: Microsoft-IIS/10.0\r\n"
-                       "Set-Cookie: ASPSESSIONIDSSDBBSDB=FJDLOIFCOPDJLPIEBAKMIICK; path=/\r\n"
-                       "Content-Length: 91\r\n"
-                       "Connection: keep-alive\r\n"
-                       "Date: Sat, 03 Feb 2024 14:07:27 GMT\r\n"
-                       "Cache-Control: max-age=0\r\n"
-                       "EO-LOG-UUID: 11455388245916591360\r\n"
-                       "EO-Cache-Status: MISS\r\n"
-                       "\r\n"
-                       "AAAAAA474B052F13794348074E005A76B91618771B00CA7309664D|0|||7ab6985c15c307f05303e8596765b79c";
 
-    char response_fail[] = "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: text/html\r\n"
-                      "Server: Microsoft-IIS/10.0\r\n"
-                      "Set-Cookie: ASPSESSIONIDSSBBATDC=GDABAILDEEPAJOBPGEAMBMEF; path=/\r\n"
-                      "Content-Length: 23\r\n"
-                      "Connection: keep-alive\r\n"
-                      "Date: Sat, 10 Aug 2024 18:42:02 GMT\r\n"
-                      "Cache-Control: max-age=0\r\n"
-                      "EO-LOG-UUID: 11609615704901754703\r\n"
-                      "EO-Cache-Status: MISS\r\n"
-                      "\r\n"
-                      "\x45\x72\x72\x6f\x72\x3a\xd3\xc3\xbb\xa7\xc3\xfb\xbb\xf2\xc3\xdc\xc2\xeb\xb4\xed\xce\xf3\x20";
-
-
-    size_t response_len = strlen(response);
-    log("HTTP len: %zu", response_len)
-    
-    printHex(response, response_len);
-
-    memcpy(http_response, response, response_len);
-//    http_response[response.length()] = '\0';
-    return (int) response_len;
-}
-
+/**
+ * 构造 FIN
+ * @param pkt
+ * @param reply_len
+ * @return
+ */
 char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     // 先构造 ACK 回复，再构造 ACK | FIN 的回复
     char *buf = new char[PKT_BUF_SIZE * 2]; // 内存由外部使用完毕后自行释放
@@ -521,5 +400,49 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     *reply_len += ntohs(ip->tot_len);
 
     return buf;
+}
+
+/**
+ * 构造 HTTP 内容
+ * @param http_response 用于嵌入 HTTP 数据的指针
+ * @return
+ */
+int cheat_reply_TCP_HTTP(char *http_response) {
+    // 注意 HTTP Response 回复长度不要超过 在单个 IP 包中能容纳的范围
+    char response[] = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: text/html\r\n"
+                      "Server: Microsoft-IIS/10.0\r\n"
+                      "Set-Cookie: ASPSESSIONIDSSDBBSDB=FJDLOIFCOPDJLPIEBAKMIICK; path=/\r\n"
+                      "Content-Length: 91\r\n"
+                      "Connection: keep-alive\r\n"
+                      "Date: Sat, 03 Feb 2024 14:07:27 GMT\r\n"
+                      "Cache-Control: max-age=0\r\n"
+                      "EO-LOG-UUID: 11455388245916591360\r\n"
+                      "EO-Cache-Status: MISS\r\n"
+                      "\r\n"
+                      "AAAAAA474B052F13794348074E005A76B91618771B00CA7309664D|0|||7ab6985c15c307f05303e8596765b79c";
+
+    char response_fail[] = "HTTP/1.1 200 OK\r\n"
+                           "Content-Type: text/html\r\n"
+                           "Server: Microsoft-IIS/10.0\r\n"
+                           "Set-Cookie: ASPSESSIONIDSSBBATDC=GDABAILDEEPAJOBPGEAMBMEF; path=/\r\n"
+                           "Content-Length: 23\r\n"
+                           "Connection: keep-alive\r\n"
+                           "Date: Sat, 10 Aug 2024 18:42:02 GMT\r\n"
+                           "Cache-Control: max-age=0\r\n"
+                           "EO-LOG-UUID: 11609615704901754703\r\n"
+                           "EO-Cache-Status: MISS\r\n"
+                           "\r\n"
+                           "\x45\x72\x72\x6f\x72\x3a\xd3\xc3\xbb\xa7\xc3\xfb\xbb\xf2\xc3\xdc\xc2\xeb\xb4\xed\xce\xf3\x20";
+
+
+    size_t response_len = strlen(response);
+    log("HTTP len: %zu", response_len)
+
+    printHex(response, response_len);
+
+    memcpy(http_response, response, response_len);
+//    http_response[response.length()] = '\0';
+    return (int) response_len;
 }
 
