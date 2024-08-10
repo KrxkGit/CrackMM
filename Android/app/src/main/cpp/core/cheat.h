@@ -93,7 +93,7 @@ struct tcp_option {
  * @return
  */
 char* cheat_reply_SYN(zdtun_pkt_t *pkt, uint32_t* reply_len);
-char* cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t* reply_len);
+char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len_ack, uint32_t *reply_len_http);
 int cheat_reply_TCP_HTTP(char* http_response);
 char* cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len);
 

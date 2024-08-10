@@ -8,7 +8,7 @@ size_t IPV4_HEADER_LEN = 20;
 size_t IPV6_HEADER_LEN = 40;
 size_t TCP_HEADER_LEN = 20;
 
-uint32_t next_seq = 1; // 下一次发包使用的序列号
+uint32_t next_seq = 2011920363; // 下一次发包使用的序列号
 
 void build_cheat_pkt(zdtun_conn_cheat *conn_cheat, char *pktBuf, u_int16_t l4_len,
                      u_int16_t optsoff) {
@@ -211,19 +211,15 @@ char *cheat_reply_SYN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     ip->ttl = 64;
     ip->protocol = IPPROTO_TCP; // 8 bit，不超过 1B，不需要考虑字节序
     ip->saddr = pkt->tuple.dst_ip.ip4;
-//    ip->saddr = inet_addr("59.56.100.207");
     ip->daddr = pkt->tuple.src_ip.ip4;
-//    ip->daddr = inet_addr("10.215.173.1");
 
     // 填充 tcp 头部
     auto tcp = (tcphdr *) (buf + ip->ihl * 4);
     tcp->th_sport = pkt->tuple.dst_port;
     tcp->th_dport = pkt->tuple.src_port;
-//    tcp->th_dport = htons(44729);
 
     tcp->th_seq = htonl(next_seq);
-    tcp->th_ack = pkt->tcp->th_seq + 1; // SYN 包 TCP 数据长度为 0
-//    tcp->th_ack = htonl(2856456483);
+    tcp->th_ack = htonl(ntohl(pkt->tcp->th_seq) + 1); // SYN 包 TCP 数据长度为 0。注意需要转换为主机序再 +1 ，然后再重新转换
 
     tcp->th_x2 = 0; // 保留
     tcp->th_off = 5; // 首部长度，单位 4B, 无选项 TCP 首部长度
@@ -276,20 +272,12 @@ char *cheat_reply_SYN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     // 返回总长度
     *reply_len = ntohs(ip->tot_len);
 
-//    char szPrint[100];
-//    log("SYN info: %s  Pkt_Size:[%d %d]", zdtun_5tuple2str(&pkt->tuple, szPrint, sizeof(szPrint)),
-//        *reply_len, tcp_total_len);
-//    log("SYN IP checksum: %hu, TCP checksum: %hu", ntohs(ip->check),
-//        ntohs(tcp->th_sum));
-//
-//    printHex(buf, *reply_len);
-
     return buf;
 }
 
-char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次，分别 在 HTTP 前与 HTTP 后
+char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len_ack, uint32_t *reply_len_http) { // ack 有 2 次，分别 在 HTTP 前与 HTTP 后
     if (pkt->l7_len == 0) { // 无 HTTP 内容，为 TCP 第三次握手，可直接忽略
-        *reply_len = 0;
+        *reply_len_ack = 0;
         log("reply empty here.")
         return nullptr;
     } else { // 包含 GET 请求，回复 ACK + HTTP Response
@@ -304,7 +292,7 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
         ip->ihl = 5; // 首部长度，单位 4B
         ip->tos = 0;
         ip->id = 0;
-        ip->frag_off = 0b010 << (16 - 3); // 前 3 位表示是否分片 (此处不分片)
+        ip->frag_off = htons(0b010 << (16 - 3)); // 前 3 位表示是否分片 (此处不分片)
         ip->ttl = 64;
         ip->protocol = IPPROTO_TCP; // 8 bit，不超过 1B，不需要考虑字节序
         ip->saddr = pkt->tuple.dst_ip.ip4;
@@ -315,7 +303,7 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
         tcp->th_sport = pkt->tuple.dst_port;
         tcp->th_dport = pkt->tuple.src_port;
         tcp->th_seq = htonl(next_seq);
-        tcp->th_ack = pkt->tcp->th_seq + pkt->l7_len; // TCP 数据长度为 pkt->l7_len
+        tcp->th_ack = htonl(ntohl(pkt->tcp->th_seq) + pkt->l7_len); // TCP 数据长度为 pkt->l7_len
         tcp->th_x2 = 0; // 保留
         tcp->th_off = 5; // 首部长度，单位 4B, 无选项 TCP 首部长度
         tcp->th_flags = TH_ACK;
@@ -338,10 +326,11 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
         next_seq += 0; // 单独的 ACK 不需要占用序列号，+0
 
         // 返回总长度
-        *reply_len = ip->tot_len;
+        *reply_len_ack = ntohs(ip->tot_len);
+        uint32_t temp = *reply_len_ack; // 保存第一阶段长度
 
-        // 继续填充 HTTP Response
-        char *http_buf = &buf[*reply_len];
+        // 继续填充 HTTP Response TODO: HTTP response 异常
+        char *http_buf = buf + (*reply_len_ack);
 
         // 填充 ip 头部
         ip = reinterpret_cast<iphdr *>(http_buf);
@@ -349,7 +338,7 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
         ip->ihl = 5; // 首部长度，单位 4B
         ip->tos = 0;
         ip->id = 0;
-        ip->frag_off = 0b010 << (16 - 3); // 前 3 位表示是否分片 (此处不分片)
+        ip->frag_off = htons(0b010 << (16 - 3)); // 前 3 位表示是否分片 (此处不分片)
         ip->ttl = 64;
         ip->protocol = IPPROTO_TCP; // 8 bit，不超过 1B，不需要考虑字节序
         ip->saddr = pkt->tuple.dst_ip.ip4;
@@ -360,7 +349,7 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
         tcp->th_sport = pkt->tuple.dst_port;
         tcp->th_dport = pkt->tuple.src_port;
         tcp->th_seq = htonl(next_seq);
-        tcp->th_ack = pkt->tcp->th_seq + pkt->l7_len; // TCP 数据长度为 pkt->l7_len
+        tcp->th_ack = htonl(ntohl(pkt->tcp->th_seq) + pkt->l7_len); // TCP 数据长度为 pkt->l7_len
         tcp->th_x2 = 0; // 保留
         tcp->th_off = 5; // 首部长度，单位 4B, 无选项 TCP 首部长度
         tcp->th_flags = TH_ACK | TH_PUSH;
@@ -377,19 +366,23 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
 
         // 修复 TCP 总长度
         tcp_total_len += (int) http_content_len;
-        tcp->th_sum = calculate_tcp_Checksum(reinterpret_cast<uint16_t *>(buf + ip->ihl * 4),
+        tcp->th_sum = calculate_tcp_Checksum(reinterpret_cast<uint16_t *>(http_buf + ip->ihl * 4),
                                              ip->saddr, ip->daddr, tcp_total_len,
                                              IPPROTO_TCP); // 校验和 : TCP 总长度
 
         // 修正 IP 总长度 与 校验和
         ip->tot_len = htons(sizeof(iphdr) + tcp_total_len); // 单位 1B. IP 包总长度
-        ip->check = calculateChecksum(reinterpret_cast<uint16_t *>(buf), ip->ihl * 4);
+        ip->check = calculateChecksum(reinterpret_cast<uint16_t *>(http_buf), ip->ihl * 4);
 
         // 更新下一次序列号 (SYN | ACK，SYN 需要占用 1 个序列号)
-        next_seq += http_content_len; // 由于 TCP 数据部分大小为 0，故 +1
+        next_seq += http_content_len;
 
         // 返回总长度
-        *reply_len += ip->tot_len;
+        *reply_len_ack += ntohs(ip->tot_len);
+
+        // 分两次写
+        *reply_len_http = *reply_len_ack;
+        *reply_len_ack = temp;
 
         return buf;
     }
@@ -397,21 +390,41 @@ char *cheat_reply_ACK(zdtun_pkt_t *pkt, uint32_t *reply_len) { // ack 有 2 次�
 
 int cheat_reply_TCP_HTTP(char *http_response) {
     // 注意 HTTP Response 回复长度不要超过 在单个 IP 包中能容纳的范围
-    std::string response = "HTTP/1.1 200 OK\n"
-                           "Content-Type: text/html\n"
-                           "Server: Microsoft-IIS/10.0\n"
-                           "Set-Cookie: ASPSESSIONIDSSDBBSDB=FJDLOIFCOPDJLPIEBAKMIICK; path=/\n"
-                           "Content-Length: 91\n"
-                           "Connection: keep-alive\n"
-                           "Date: Sat, 03 Feb 2024 14:07:27 GMT\n"
-                           "Cache-Control: max-age=0\n"
-                           "EO-LOG-UUID: 11455388245916591360\n"
-                           "EO-Cache-Status: MISS\n"
-                           "\n"
-                           "AAAAAA474B052F13794348074E005A76B91618771B00CA7309664D|0|||7ab6985c15c307f05303e8596765b79c";
+    char response[] = "HTTP/1.1 200 OK\r\n"
+                       "Content-Type: text/html\r\n"
+                       "Server: Microsoft-IIS/10.0\r\n"
+                       "Set-Cookie: ASPSESSIONIDSSDBBSDB=FJDLOIFCOPDJLPIEBAKMIICK; path=/\r\n"
+                       "Content-Length: 91\r\n"
+                       "Connection: keep-alive\r\n"
+                       "Date: Sat, 03 Feb 2024 14:07:27 GMT\r\n"
+                       "Cache-Control: max-age=0\r\n"
+                       "EO-LOG-UUID: 11455388245916591360\r\n"
+                       "EO-Cache-Status: MISS\r\n"
+                       "\r\n"
+                       "AAAAAA474B052F13794348074E005A76B91618771B00CA7309664D|0|||7ab6985c15c307f05303e8596765b79c";
 
-    memcpy(http_response, response.c_str(), response.length());
-    return (int) response.length();
+    char response_fail[] = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: text/html\r\n"
+                      "Server: Microsoft-IIS/10.0\r\n"
+                      "Set-Cookie: ASPSESSIONIDSSBBATDC=GDABAILDEEPAJOBPGEAMBMEF; path=/\r\n"
+                      "Content-Length: 23\r\n"
+                      "Connection: keep-alive\r\n"
+                      "Date: Sat, 10 Aug 2024 18:42:02 GMT\r\n"
+                      "Cache-Control: max-age=0\r\n"
+                      "EO-LOG-UUID: 11609615704901754703\r\n"
+                      "EO-Cache-Status: MISS\r\n"
+                      "\r\n"
+                      "\x45\x72\x72\x6f\x72\x3a\xd3\xc3\xbb\xa7\xc3\xfb\xbb\xf2\xc3\xdc\xc2\xeb\xb4\xed\xce\xf3\x20";
+
+
+    size_t response_len = strlen(response);
+    log("HTTP len: %zu", response_len)
+    
+    printHex(response, response_len);
+
+    memcpy(http_response, response, response_len);
+//    http_response[response.length()] = '\0';
+    return (int) response_len;
 }
 
 char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
@@ -425,7 +438,7 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     ip->ihl = 5; // 首部长度，单位 4B
     ip->tos = 0;
     ip->id = 0;
-    ip->frag_off = 0b010 << (16 - 3); // 前 3 位表示是否分片 (此处不分片)
+    ip->frag_off = htons(0b010 << (16 - 3)); // 前 3 位表示是否分片 (此处不分片)
     ip->ttl = 64;
     ip->protocol = IPPROTO_TCP; // 8 bit，不超过 1B，不需要考虑字节序
     ip->saddr = pkt->tuple.dst_ip.ip4;
@@ -436,7 +449,7 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     tcp->th_sport = pkt->tuple.dst_port;
     tcp->th_dport = pkt->tuple.src_port;
     tcp->th_seq = htonl(next_seq);
-    tcp->th_ack = pkt->tcp->th_seq + 1; // TCP 数据长度为 0
+    tcp->th_ack = htonl(ntohl(pkt->tcp->th_seq) + 1); // TCP 数据长度为 0
     tcp->th_x2 = 0; // 保留
     tcp->th_off = 5; // 首部长度，单位 4B, 无选项 TCP 首部长度
     tcp->th_flags = TH_ACK;
@@ -459,10 +472,10 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     next_seq += 0; // 单独的 ACK 不需要占用序列号，+0
 
     // 返回总长度
-    *reply_len = ip->tot_len;
+    *reply_len = ntohs(ip->tot_len);
 
     // 继续填充 ACK | FIN
-    char *fin = &buf[*reply_len];
+    char *fin = buf + *reply_len;
 
     // 填充 ip 头部
     ip = reinterpret_cast<iphdr *>(fin);
@@ -470,7 +483,7 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     ip->ihl = 5; // 首部长度，单位 4B
     ip->tos = 0;
     ip->id = 0;
-    ip->frag_off = 0b010 << (16 - 3); // 前 3 位表示是否分片 (此处不分片)
+    ip->frag_off = htons(0b010 << (16 - 3)); // 前 3 位表示是否分片 (此处不分片)
     ip->ttl = 64;
     ip->protocol = IPPROTO_TCP; // 8 bit，不超过 1B，不需要考虑字节序
     ip->saddr = pkt->tuple.dst_ip.ip4;
@@ -481,7 +494,7 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     tcp->th_sport = pkt->tuple.dst_port;
     tcp->th_dport = pkt->tuple.src_port;
     tcp->th_seq = htonl(next_seq);
-    tcp->th_ack = pkt->tcp->th_seq + pkt->l7_len; // TCP 数据长度为 pkt->l7_len
+    tcp->th_ack = htonl(ntohl(pkt->tcp->th_seq) + 1); // TCP 数据长度为 pkt->l7_len
     tcp->th_x2 = 0; // 保留
     tcp->th_off = 5; // 首部长度，单位 4B, 无选项 TCP 首部长度
     tcp->th_flags = TH_ACK | TH_FIN;
@@ -493,19 +506,19 @@ char *cheat_reply_TCP_FIN(zdtun_pkt_t *pkt, uint32_t *reply_len) {
     tcp->th_off = tcp_total_len / 4;
 
     // 修复 TCP 总长度
-    tcp->th_sum = calculate_tcp_Checksum(reinterpret_cast<uint16_t *>(buf + ip->ihl * 4),
+    tcp->th_sum = calculate_tcp_Checksum(reinterpret_cast<uint16_t *>(fin + ip->ihl * 4),
                                          ip->saddr, ip->daddr, tcp_total_len,
                                          IPPROTO_TCP); // 校验和 : TCP 总长度
 
     // 修正 IP 总长度 与 校验和
     ip->tot_len = htons(sizeof(iphdr) + tcp_total_len); // 单位 1B. IP 包总长度
-    ip->check = calculateChecksum(reinterpret_cast<uint16_t *>(buf), ip->ihl * 4);
+    ip->check = calculateChecksum(reinterpret_cast<uint16_t *>(fin), ip->ihl * 4);
 
     // 更新下一次序列号 (FIN | ACK，FIN 需要占用 1 个序列号)
     next_seq += 1; // 由于 TCP 数据部分大小为 0，故 +1
 
     // 返回总长度
-    *reply_len += ip->tot_len;
+    *reply_len += ntohs(ip->tot_len);
 
     return buf;
 }

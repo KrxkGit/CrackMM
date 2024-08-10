@@ -80,6 +80,7 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
             pkt->tuple.dst_port == target_addr.sin_port && pkt->tuple.ipproto == IPPROTO_TCP) {
 
             uint32_t reply_len = 0;
+            uint32_t reply_http_len = 0;
             char *reply_buf;
             size_t write_reply_len = 0;
 
@@ -98,10 +99,10 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                         write_reply_len)
                 }
                 delete[]reply_buf;
-            } else if (flags & TH_ACK && !(flags & TH_PUSH) && !(flags & TH_FIN)) {
+            } else if (flags & TH_ACK && !(flags & TH_PUSH) && !(flags & TH_FIN)) { // 第三次握手的ACK
                 hook_progress += 1;
                 log("Recv ACK here: 0x%x, len: %hu", pkt->tcp->th_flags, pkt->len)
-                reply_buf = cheat_reply_ACK(pkt, &reply_len);
+                reply_buf = cheat_reply_ACK(pkt, &reply_len, &reply_http_len);
                 if (reply_buf == nullptr) {
                     // nothing to do
                 }
@@ -109,11 +110,18 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                 hook_progress += 1;
                 log("Recv HTTP Request here : 0x%x, len: %hu %hu %hu", pkt->tcp->th_flags,
                     pkt->len, pkt->l4_hdr_len, pkt->l7_len)
-                log("Recv: %s", origin_data + 20)
-                reply_buf = cheat_reply_ACK(pkt, &reply_len);
+//                log("Recv: %s", pkt->l7)
+                reply_buf = cheat_reply_ACK(pkt, &reply_len, &reply_http_len);
                 write_reply_len = write(tun_fd, reply_buf, reply_len);
                 if (write_reply_len >= reply_len) {
-                    log("write HTTP Response: need: %u actual: %zd\n", reply_len,
+                    log("write: %s", reply_buf + 40 + 40)
+                    log("write HTTP Response(ACK): need: %u actual: %zd\n", reply_len,
+                        write_reply_len)
+                }
+                write_reply_len = write(tun_fd, reply_buf + reply_len, reply_http_len);
+                if (write_reply_len >= reply_http_len) {
+                    log("write: %s", reply_buf + 40 + 40)
+                    log("write HTTP Response(HTTP): need: %u actual: %zd\n", reply_http_len,
                         write_reply_len)
                 }
                 delete[]reply_buf;
