@@ -8,6 +8,9 @@
 FILE *file = nullptr;
 
 void pcap_dump_init(const char* file_name) {
+    if(file != nullptr) {
+        return;
+    }
     pcap_file_header file_header;
 
     // 打开输出文件
@@ -28,6 +31,9 @@ void pcap_dump_init(const char* file_name) {
 }
 
 void pcap_dump_data(u_char* pkt, uint32_t len) {
+    if(file == nullptr) {
+        return;
+    }
     pcap_packet_header packet_header;
     // 设置数据包头部信息
     packet_header.ts_sec = clock() / CLOCKS_PER_SEC;
@@ -42,9 +48,10 @@ void pcap_dump_data(u_char* pkt, uint32_t len) {
     fwrite(pkt, len, 1, file);
 
     // 关闭输出文件
-    fflush(file);
+//    fflush(file);
 }
 
 void pcap_dump_finish() {
     fclose(file);
+    file = nullptr;
 }
