@@ -48,10 +48,13 @@ class MainActivity : AppCompatActivity() {
         binding.activeKey.isEnabled = false
         binding.textView.setText(getString(R.string.vpn_start_sucess))
 
+        preparePcapOutputPath(this.filesDir.absolutePath)
+
         val intent = Intent(this, ActiveService::class.java)
         ContextCompat.startForegroundService(this, intent)
     }
 
+    private external fun preparePcapOutputPath(path : String)
 
     companion object {
         // Used to load the 'crackmm' library on application startup.
