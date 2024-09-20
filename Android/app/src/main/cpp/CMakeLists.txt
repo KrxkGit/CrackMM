@@ -11,6 +11,17 @@ cmake_minimum_required(VERSION 3.22.1)
 # build script scope).
 project("crackmm")
 
+# Hidden symbol table
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
+# Optimization level
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
+# Other compilation options
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-inline -fstack-protector")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-inline -fstack-protector")
+
+
 # Creates and names a library, sets it as either STATIC
 # or SHARED, and provides the relative paths to its source code.
 # You can define multiple libraries, and CMake builds them for you.
@@ -39,7 +50,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
         core/pkt_processor.cpp
         core/cheat.cpp
         core/pcap_dumper.cpp
-)
+        core/acquire_permission.cpp)
 
 
 # Specifies libraries CMake should link to your target library. You

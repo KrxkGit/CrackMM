@@ -5,7 +5,7 @@
 #ifndef CRACKMM_CHEAT_H
 #define CRACKMM_CHEAT_H
 
-extern "C" { ;
+extern "C" {
 #include "zdtun.h"
 }
 
