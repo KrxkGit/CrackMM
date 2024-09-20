@@ -70,7 +70,6 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                     log("hook: %s", inet_ntoa(target_addr.sin_addr));
 
                     // dump pcap
-                    pcap_dump_init("/sdcard/Download/crackmm.pcap");
                     pcap_dump_data((u_char *)pkt->buf, pkt->len);
                     return false;
                 }
@@ -227,7 +226,6 @@ void handle_thread(int fd) {
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_krxkli_crackmm_core_PktProcessor_handleProcessPacket(JNIEnv *env, jobject thiz, jint fd) {
-// TODO: implement handleProcessPacket()
     log("handleProcessPacket")
     // 保存 Env 状态
     ::env = env;
@@ -255,4 +253,21 @@ Java_com_krxkli_crackmm_core_PktProcessor_handleProcessPacket(JNIEnv *env, jobje
 
         cv.wait(lock);
     }
+}
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_krxkli_crackmm_MainActivity_preparePcapOutputPath(JNIEnv *env, jobject thiz,
+                                                           jstring path) {
+
+    jboolean isCopy;
+    const char* pathStr = env->GetStringUTFChars(path, &isCopy);
+    if (isCopy == JNI_TRUE) {
+        __android_log_print(ANDROID_LOG_INFO, "MainActivity", "isCopy = true");
+    } else {
+        __android_log_print(ANDROID_LOG_INFO, "MainActivity", "isCopy = false");
+    }
+
+    GetUserDownloadDir(pathStr);
+    env->ReleaseStringUTFChars(path, pathStr);
+
 }

@@ -5,7 +5,7 @@
 
 #define MAX_PACKET_SIZE 65535
 
-FILE *file = nullptr;
+static FILE *file = nullptr;
 
 void pcap_dump_init(const char* file_name) {
     if(file != nullptr) {

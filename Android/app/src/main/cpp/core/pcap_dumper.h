@@ -34,5 +34,6 @@ typedef struct {
 void pcap_dump_init(const char* file_name);
 void pcap_dump_data(u_char* pkt, uint32_t len);
 void pcap_dump_finish();
+void GetUserDownloadDir(const char* dir);
 
 #endif //CRACKMM_PCAP_DUMPER_H
