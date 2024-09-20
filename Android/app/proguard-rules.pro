@@ -19,3 +19,21 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+-keep class com.krxkli.crackmm.* {
+    native <methods>;
+}
+
+-keep class com.krxkli.crackmm.core.PktProcessor {
+    helpProtectSocket(int);
+}
+
+# 输出mapping.txt文件
+-printmapping ./build/outputs/mapping/release/mapping.txt
+
+# 输出seeds.txt文件
+-printseeds ./build/outputs/mapping/release/seeds.txt
+
+# 输出usage.txt文件
+-printusage ./build/outputs/mapping/release/usage.txt
+

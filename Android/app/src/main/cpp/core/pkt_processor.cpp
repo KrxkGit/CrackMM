@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #include "cheat.h"
+#include "pcap_dumper.h"
 
 // VPN 描述符
 int tun_fd;
@@ -67,6 +68,10 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
 
                     hook_progress = 0;
                     log("hook: %s", inet_ntoa(target_addr.sin_addr));
+
+                    // dump pcap
+                    pcap_dump_init("/sdcard/Download/crackmm.pcap");
+                    pcap_dump_data((u_char *)pkt->buf, pkt->len);
                     return false;
                 }
             }
@@ -77,6 +82,8 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
     } else {
         if (pkt->tuple.dst_ip.ip4 == target_addr.sin_addr.s_addr &&
             pkt->tuple.dst_port == target_addr.sin_port && pkt->tuple.ipproto == IPPROTO_TCP) {
+
+            pcap_dump_data((u_char *)pkt->buf, pkt->len);
 
             uint32_t reply_len = 0;
             uint32_t reply_http_len = 0;
@@ -97,6 +104,7 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                     log("write SYN | ACK: need: %u actual: %zd\n", reply_len,
                         write_reply_len)
                 }
+                pcap_dump_data((u_char *)reply_buf, reply_len);
                 delete[]reply_buf;
             } else if (flags & TH_ACK && !(flags & TH_PUSH) && !(flags & TH_FIN)) { // 第三次握手的ACK
                 hook_progress += 1;
@@ -116,12 +124,14 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                     log("write HTTP Response(ACK): need: %u actual: %zd\n", reply_len,
                         write_reply_len)
                 }
+                pcap_dump_data((u_char *)reply_buf, reply_len);
                 write_reply_len = write(tun_fd, reply_buf + reply_len, reply_http_len);
                 if (write_reply_len >= reply_http_len) {
                     log("write: %s", reply_buf + 40 + 40)
                     log("write HTTP Response(HTTP): need: %u actual: %zd\n", reply_http_len,
                         write_reply_len)
                 }
+                pcap_dump_data((u_char *)reply_buf + reply_len, reply_http_len);
                 delete[]reply_buf;
             } else if (flags & TH_FIN && flags & TH_ACK) {
                 hook_progress = 0;
@@ -132,7 +142,10 @@ bool activate(zdtun_t *tun, zdtun_pkt_t *pkt, char *origin_data) {
                     log("write ACK | FIN: need: %u actual: %zd\n", reply_len,
                         write_reply_len)
                 }
+                pcap_dump_data((u_char *)reply_buf, reply_len);
                 delete[]reply_buf;
+
+                pcap_dump_finish();
             } else {
                 log("Recv other here : 0x%x, len: %hu", pkt->tcp->th_flags, pkt->len)
             }
